@@ -22,6 +22,8 @@ BEXIO_REDIRECT_URI  = _getenv("BEXIO_REDIRECT_URI")
 AUTH_URL  = "https://auth.bexio.com/realms/bexio/protocol/openid-connect/auth"
 TOKEN_URL = "https://auth.bexio.com/realms/bexio/protocol/openid-connect/token"
 USERINFO_URL = "https://auth.bexio.com/realms/bexio/protocol/openid-connect/userinfo"
+API_BASE   = "https://api.bexio.com/2.0"
+JOURNAL_URL = f"{API_BASE}/journal"
 
 
 SCOPES = "openid profile email offline_access company_profile"
