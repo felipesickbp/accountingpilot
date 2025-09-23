@@ -1,14 +1,13 @@
-import os, time, json, base64
+import os, time, base64
 import streamlit as st
 import requests
 from urllib.parse import urlencode
-from dotenv import load_dotenv
 
-load_dotenv()
-
-BEXIO_CLIENT_ID = os.getenv("BEXIO_CLIENT_ID")
-BEXIO_CLIENT_SECRET = os.getenv("BEXIO_CLIENT_SECRET")
-BEXIO_REDIRECT_URI = os.getenv("BEXIO_REDIRECT_URI")
+# --------- CONFIG FROM SECRETS ----------
+# In Streamlit Cloud, set these under "App settings" → "Secrets"
+BEXIO_CLIENT_ID     = st.secrets["bexio"]["client_id"]
+BEXIO_CLIENT_SECRET = st.secrets["bexio"]["client_secret"]
+BEXIO_REDIRECT_URI  = st.secrets["bexio"]["redirect_uri"]
 
 AUTH_URL  = "https://idp.bexio.com/authorize"
 TOKEN_URL = "https://idp.bexio.com/token"
@@ -17,6 +16,8 @@ JOURNAL_URL = f"{API_BASE}/journal"  # adjust if your tenant uses a different pa
 
 SCOPES = "openid profile email offline_access company_profile"
 
+st.set_page_config(page_title="bexio Journal Poster", page_icon="📘")
+
 if "oauth" not in st.session_state:
     st.session_state.oauth = {}
 
@@ -24,7 +25,6 @@ def auth_header(token):
     return {"Authorization": f"Bearer {token}", "Accept": "application/json"}
 
 def save_tokens(tokens):
-    # tokens = {access_token, refresh_token, expires_in, token_type, ...}
     tokens["expires_at"] = time.time() + int(tokens.get("expires_in", 3600)) - 30
     st.session_state.oauth = tokens
 
@@ -45,22 +45,20 @@ def refresh_access_token():
     r.raise_for_status()
     save_tokens(r.json())
 
-def ensure_token():
-    if need_login():
-        st.stop()
-
 def login_link():
+    state = "anti-csrf-" + base64.urlsafe_b64encode(os.urandom(12)).decode("utf-8")
     params = {
         "client_id": BEXIO_CLIENT_ID,
         "redirect_uri": BEXIO_REDIRECT_URI,
         "response_type": "code",
         "scope": SCOPES,
-        "state": "anti-csrf-" + base64.urlsafe_b64encode(os.urandom(12)).decode("utf-8"),
+        "state": state,
     }
     url = f"{AUTH_URL}?{urlencode(params)}"
     st.markdown(f"[Sign in with bexio]({url})")
 
 def handle_callback():
+    # Streamlit new API
     code = st.query_params.get("code")
     if not code:
         return
@@ -74,26 +72,25 @@ def handle_callback():
     r = requests.post(TOKEN_URL, data=data, timeout=30)
     r.raise_for_status()
     save_tokens(r.json())
-    # Clean query params so refreshes don’t re-run callback
     st.query_params.clear()
 
-st.title("bexio Journal Poster")
+st.title("📘 bexio Journal Poster")
 
-# 1) Handle OAuth callback if present
+# 1) OAuth callback
 handle_callback()
 
 # 2) If not logged in, show login
 if need_login():
-    st.info("Connect your bexio account to continue.")
+    st.info("Verbinde dein bexio Konto, um Buchungen zu posten.")
     login_link()
     st.stop()
 
-# 3) Refresh token if needed
+# 3) Refresh if needed
 if time.time() > st.session_state.oauth.get("expires_at", 0):
-    with st.spinner("Refreshing bexio session…"):
+    with st.spinner("Session wird erneuert …"):
         refresh_access_token()
 
-# 4) Build the posting form
+# 4) Form inputs (your required fields)
 with st.form("post_entry"):
     col1, col2 = st.columns(2)
     date = col1.date_input("Datum (YYYY-MM-DD)")
@@ -101,35 +98,25 @@ with st.form("post_entry"):
 
     col3, col4 = st.columns(2)
     amount = col3.number_input("Betrag", min_value=0.00, step=0.05, format="%.2f")
-    waehrung = col4.text_input("Währung (z.B. CHF, EUR, USD)", value="CHF")
+    waehrung = col4.text_input("Währung (CHF/EUR/USD …)", value="CHF")
 
     col5, col6 = st.columns(2)
     waehrungskurs = col5.number_input("Währungskurs (currency_factor)", min_value=0.0, step=0.0001, format="%.6f", value=1.0)
-    debit_kto = col6.text_input("Debit-Konto (z.B. 1020)")
+    debit_kto = col6.text_input("Debit-Konto (z. B. 1020)")
 
-    credit_kto = st.text_input("Credit-Konto (z.B. 3200)")
-
+    credit_kto = st.text_input("Credit-Konto (z. B. 3200)")
     submitted = st.form_submit_button("Buchen")
 
-# 5) Post to bexio journal
 if submitted:
-    ensure_token()
     payload = {
-        # Map your inputs to the journal fields.
-        # Field names below reflect the journal endpoint naming commonly seen in docs/change logs.
-        "date": str(date),                     # e.g. "2025-09-23"
-        "text": beschreibung,                  # posting text/description
-        "amount": float(amount),               # posting amount in 'currency'
-        "currency": waehrung,                  # e.g. "CHF"
-        "currency_factor": float(waehrungskurs),  # exchange rate to base currency (read-only in some contexts)
-        "debit_account": str(debit_kto),       # your chart-of-accounts code
+        "date": str(date),
+        "text": beschreibung,
+        "amount": float(amount),
+        "currency": waehrung,
+        "currency_factor": float(waehrungskurs),
+        "debit_account": str(debit_kto),
         "credit_account": str(credit_kto),
     }
-
-    # Some tenants require account IDs instead of codes. If your POST 400s with "account not found",
-    # first GET your accounts to learn the expected identifiers and adjust the fields accordingly.
-    # Example: requests.get(f"{API_BASE}/account", headers=auth_header(...))
-
     try:
         r = requests.post(JOURNAL_URL, headers=auth_header(st.session_state.oauth["access_token"]),
                           json=payload, timeout=30)
@@ -138,7 +125,7 @@ if submitted:
             r = requests.post(JOURNAL_URL, headers=auth_header(st.session_state.oauth["access_token"]),
                               json=payload, timeout=30)
         if r.status_code == 429:
-            st.error("Rate limited by bexio (HTTP 429). Try again in a moment.")
+            st.error("Rate limit (429). Bitte später erneut versuchen.")
         r.raise_for_status()
         st.success("Buchung erfolgreich erfasst.")
         st.json(r.json())
