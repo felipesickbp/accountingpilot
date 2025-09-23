@@ -7,7 +7,7 @@ from dotenv import load_dotenv
 # --------- LOAD .env LOCALLY OR IN REPO ----------
 # Note: On some hosted environments, .env may be ignored for security.
 # If you deploy and it fails to load, set real OS env vars instead.
-load_dotenv()
+load_dotenv(override=True) 
 
 def _getenv(name: str, required=True, default=None):
     v = os.getenv(name, default)
