@@ -2,12 +2,22 @@ import os, time, base64
 import streamlit as st
 import requests
 from urllib.parse import urlencode
+from dotenv import load_dotenv
 
-# --------- CONFIG FROM SECRETS ----------
-# In Streamlit Cloud, set these under "App settings" → "Secrets"
-BEXIO_CLIENT_ID     = st.secrets["bexio"]["client_id"]
-BEXIO_CLIENT_SECRET = st.secrets["bexio"]["client_secret"]
-BEXIO_REDIRECT_URI  = st.secrets["bexio"]["redirect_uri"]
+# --------- LOAD .env LOCALLY OR IN REPO ----------
+# Note: On some hosted environments, .env may be ignored for security.
+# If you deploy and it fails to load, set real OS env vars instead.
+load_dotenv()
+
+def _getenv(name: str, required=True, default=None):
+    v = os.getenv(name, default)
+    if required and (v is None or v.strip() == ""):
+        st.stop()  # immediately stop with a clear message on the page
+    return v
+
+BEXIO_CLIENT_ID     = _getenv("BEXIO_CLIENT_ID")
+BEXIO_CLIENT_SECRET = _getenv("BEXIO_CLIENT_SECRET")
+BEXIO_REDIRECT_URI  = _getenv("BEXIO_REDIRECT_URI")
 
 AUTH_URL  = "https://idp.bexio.com/authorize"
 TOKEN_URL = "https://idp.bexio.com/token"
@@ -58,7 +68,6 @@ def login_link():
     st.markdown(f"[Sign in with bexio]({url})")
 
 def handle_callback():
-    # Streamlit new API
     code = st.query_params.get("code")
     if not code:
         return
@@ -90,7 +99,7 @@ if time.time() > st.session_state.oauth.get("expires_at", 0):
     with st.spinner("Session wird erneuert …"):
         refresh_access_token()
 
-# 4) Form inputs (your required fields)
+# 4) Form
 with st.form("post_entry"):
     col1, col2 = st.columns(2)
     date = col1.date_input("Datum (YYYY-MM-DD)")
