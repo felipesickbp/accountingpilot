@@ -53,6 +53,17 @@ def refresh_access_token():
     r = requests.post(TOKEN_URL, data=data, timeout=30)
     r.raise_for_status()
     save_tokens(r.json())
+with st.expander("Config diagnostics"):
+    st.write("BEXIO_REDIRECT_URI being sent:", repr(BEXIO_REDIRECT_URI))
+    from urllib.parse import urlencode
+    dbg = {
+        "client_id": BEXIO_CLIENT_ID[:3] + "…",
+        "redirect_uri": BEXIO_REDIRECT_URI,
+        "response_type": "code",
+        "scope": SCOPES,
+        "state": "diag",
+    }
+    st.code(f"{AUTH_URL}?{urlencode(dbg)}")
 
 def login_link():
     state = "anti-csrf-" + base64.urlsafe_b64encode(os.urandom(12)).decode("utf-8")
