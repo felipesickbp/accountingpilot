@@ -45,26 +45,22 @@ def need_login():
 def refresh_access_token():
     if not st.session_state.oauth.get("refresh_token"):
         return
-    data = {
-        "grant_type": "refresh_token",
-        "refresh_token": st.session_state.oauth["refresh_token"],
+    data = {"grant_type": "authorization_code",
+        "code": code,
+        "redirect_uri": BEXIO_REDIRECT_URI,    # same trailing slash
         "client_id": BEXIO_CLIENT_ID,
-        "client_secret": BEXIO_CLIENT_SECRET,
-        "redirect_uri": BEXIO_REDIRECT_URI,
-    }
+        "client_secret": BEXIO_CLIENT_SECRET}
     r = requests.post(TOKEN_URL, data=data, timeout=30)
     r.raise_for_status()
     save_tokens(r.json())
 
 def login_link():
     state = "anti-csrf-" + base64.urlsafe_b64encode(os.urandom(12)).decode("utf-8")
-    params = {
-        "client_id": BEXIO_CLIENT_ID,
-        "redirect_uri": BEXIO_REDIRECT_URI,
-        "response_type": "code",
-        "scope": SCOPES,
-        "state": state,
-    }
+    params = {"client_id": BEXIO_CLIENT_ID,
+          "redirect_uri": BEXIO_REDIRECT_URI,  # has trailing slash
+          "response_type": "code",
+          "scope": SCOPES,
+          "state": state}
     url = f"{AUTH_URL}?{urlencode(params)}"
     st.markdown(f"[Sign in with bexio]({url})")
 
