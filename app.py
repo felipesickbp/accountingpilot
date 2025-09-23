@@ -46,14 +46,17 @@ def need_login():
 def refresh_access_token():
     if not st.session_state.oauth.get("refresh_token"):
         return
-    data = {"grant_type": "authorization_code",
-        "code": code,
-        "redirect_uri": BEXIO_REDIRECT_URI,    # same trailing slash
+    data = {
+        "grant_type": "refresh_token",
+        "refresh_token": st.session_state.oauth["refresh_token"],
         "client_id": BEXIO_CLIENT_ID,
-        "client_secret": BEXIO_CLIENT_SECRET}
+        "client_secret": BEXIO_CLIENT_SECRET,
+        "redirect_uri": BEXIO_REDIRECT_URI,
+    }
     r = requests.post(TOKEN_URL, data=data, timeout=30)
     r.raise_for_status()
     save_tokens(r.json())
+
 with st.expander("Config diagnostics"):
     st.write("BEXIO_REDIRECT_URI being sent:", repr(BEXIO_REDIRECT_URI))
     from urllib.parse import urlencode
@@ -125,30 +128,35 @@ with st.form("post_entry"):
     credit_kto = st.text_input("Credit-Konto (z. B. 3200)")
     submitted = st.form_submit_button("Buchen")
 
+import io, csv
+
 if submitted:
-    payload = {
-        "date": str(date),
-        "text": beschreibung,
-        "amount": float(amount),
-        "currency": waehrung,
-        "currency_factor": float(waehrungskurs),
-        "debit_account": str(debit_kto),
-        "credit_account": str(credit_kto),
-    }
-    try:
-        r = requests.post(JOURNAL_URL, headers=auth_header(st.session_state.oauth["access_token"]),
-                          json=payload, timeout=30)
-        if r.status_code == 401:
-            refresh_access_token()
-            r = requests.post(JOURNAL_URL, headers=auth_header(st.session_state.oauth["access_token"]),
-                              json=payload, timeout=30)
-        if r.status_code == 429:
-            st.error("Rate limit (429). Bitte später erneut versuchen.")
-        r.raise_for_status()
-        st.success("Buchung erfolgreich erfasst.")
-        st.json(r.json())
-    except requests.HTTPError as e:
-        st.error(f"HTTP error: {e.response.status_code} – {e.response.text}")
-    except Exception as e:
-        st.error(f"Unexpected error: {e}")
+    # Build one CSV row in the format you'd import in bexio's Manual Posting import.
+    headers = [
+        "date", "text", "amount", "currency",
+        "currency_factor", "debit_account", "credit_account"
+    ]
+    row = [
+        str(date),
+        beschreibung,
+        f"{float(amount):.2f}",
+        waehrung,
+        f"{float(waehrungskurs):.6f}",
+        str(debit_kto),
+        str(credit_kto),
+    ]
+
+    buf = io.StringIO()
+    writer = csv.writer(buf, delimiter=';')  # many Swiss CSVs use ';' — change to ',' if needed
+    writer.writerow(headers)
+    writer.writerow(row)
+    csv_bytes = buf.getvalue().encode("utf-8")
+
+    st.success("CSV vorbereitet. In bexio: Buchhaltung → Manuelle Buchung → Import.")
+    st.download_button(
+        "CSV für bexio-Import herunterladen",
+        data=csv_bytes,
+        file_name="bexio_journal_import.csv",
+        mime="text/csv",
+    )
 
