@@ -21,6 +21,7 @@ BEXIO_REDIRECT_URI  = _getenv("BEXIO_REDIRECT_URI")
 
 AUTH_URL  = "https://auth.bexio.com/realms/bexio/protocol/openid-connect/auth"
 TOKEN_URL = "https://auth.bexio.com/realms/bexio/protocol/openid-connect/token"
+
 USERINFO_URL = "https://auth.bexio.com/realms/bexio/protocol/openid-connect/userinfo"
 
 JOURNAL_URL = f"{API_BASE}/journal"  # adjust if your tenant uses a different path
