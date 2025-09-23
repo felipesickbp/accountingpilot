@@ -109,4 +109,41 @@ with st.form("post_entry"):
 
     credit_kto = st.text_input("Credit-Konto (z.B. 3200)")
 
-    submitted = st.form_s_
+    submitted = st.form_submit_button("Buchen")
+
+# 5) Post to bexio journal
+if submitted:
+    ensure_token()
+    payload = {
+        # Map your inputs to the journal fields.
+        # Field names below reflect the journal endpoint naming commonly seen in docs/change logs.
+        "date": str(date),                     # e.g. "2025-09-23"
+        "text": beschreibung,                  # posting text/description
+        "amount": float(amount),               # posting amount in 'currency'
+        "currency": waehrung,                  # e.g. "CHF"
+        "currency_factor": float(waehrungskurs),  # exchange rate to base currency (read-only in some contexts)
+        "debit_account": str(debit_kto),       # your chart-of-accounts code
+        "credit_account": str(credit_kto),
+    }
+
+    # Some tenants require account IDs instead of codes. If your POST 400s with "account not found",
+    # first GET your accounts to learn the expected identifiers and adjust the fields accordingly.
+    # Example: requests.get(f"{API_BASE}/account", headers=auth_header(...))
+
+    try:
+        r = requests.post(JOURNAL_URL, headers=auth_header(st.session_state.oauth["access_token"]),
+                          json=payload, timeout=30)
+        if r.status_code == 401:
+            refresh_access_token()
+            r = requests.post(JOURNAL_URL, headers=auth_header(st.session_state.oauth["access_token"]),
+                              json=payload, timeout=30)
+        if r.status_code == 429:
+            st.error("Rate limited by bexio (HTTP 429). Try again in a moment.")
+        r.raise_for_status()
+        st.success("Buchung erfolgreich erfasst.")
+        st.json(r.json())
+    except requests.HTTPError as e:
+        st.error(f"HTTP error: {e.response.status_code} – {e.response.text}")
+    except Exception as e:
+        st.error(f"Unexpected error: {e}")
+
