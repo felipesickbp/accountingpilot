@@ -19,9 +19,10 @@ BEXIO_CLIENT_ID     = _getenv("BEXIO_CLIENT_ID")
 BEXIO_CLIENT_SECRET = _getenv("BEXIO_CLIENT_SECRET")
 BEXIO_REDIRECT_URI  = _getenv("BEXIO_REDIRECT_URI")
 
-AUTH_URL  = "https://idp.bexio.com/authorize"
-TOKEN_URL = "https://idp.bexio.com/token"
-API_BASE  = "https://api.bexio.com/2.0"
+AUTH_URL  = "https://auth.bexio.com/realms/bexio/protocol/openid-connect/auth"
+TOKEN_URL = "https://auth.bexio.com/realms/bexio/protocol/openid-connect/token"
+USERINFO_URL = "https://auth.bexio.com/realms/bexio/protocol/openid-connect/userinfo"
+
 JOURNAL_URL = f"{API_BASE}/journal"  # adjust if your tenant uses a different path
 
 SCOPES = "openid profile email offline_access company_profile"
