@@ -1,8 +1,9 @@
-import os, time, base64
+import os, time, base64, re
 import streamlit as st
 import requests
 from urllib.parse import urlencode
 from dotenv import load_dotenv
+from datetime import date as dt_date
 
 load_dotenv(override=True)
 
@@ -31,9 +32,9 @@ st.set_page_config(page_title="bexio Manual Entry Poster (v3)", page_icon="📘"
 if "oauth" not in st.session_state:
     st.session_state.oauth = {}
 if "acct_map" not in st.session_state:
-    st.session_state.acct_map = {}   # e.g. {"1020": "77", "3200": "139"}
+    st.session_state.acct_map = {}   # {"1020": "77", "3200": "139"}
 if "curr_map" not in st.session_state:
-    st.session_state.curr_map = {}   # e.g. {"CHF": "1", "EUR": "2", "USD": "3"}
+    st.session_state.curr_map = {}   # {"CHF": "1", "EUR": "2", "USD": "3"}
 
 def auth_header(token):
     return {"Authorization": f"Bearer {token}", "Accept": "application/json"}
@@ -87,22 +88,57 @@ def handle_callback():
     save_tokens(r.json())
     st.query_params.clear()
 
+# ---------- mapping & validation helpers ----------
+
+_SPLIT_RE = re.compile(r"\s*[:=,;\s]\s*")
+
+def _parse_mapping(text: str, upper_keys=False):
+    mapping, bad = {}, []
+    for i, line in enumerate(text.splitlines(), start=1):
+        s = line.strip()
+        if not s or s.startswith("#") or s.startswith("//"):
+            continue
+        parts = [p for p in _SPLIT_RE.split(s) if p != ""]
+        if len(parts) != 2:
+            bad.append((i, line)); continue
+        k, v = parts[0].strip(), parts[1].strip()
+        if upper_keys:
+            k = k.upper()
+        if not k or not v:
+            bad.append((i, line)); continue
+        mapping[k] = v
+    return mapping, bad
+
 def resolve_account_id(user_value: str) -> int:
-    """Accept '1020' (number) or an integer ID; map to account_id."""
     s = str(user_value).strip()
+    # if user typed an account number (e.g., "1020") and it's in mapping
     if s in st.session_state.acct_map:
         return int(st.session_state.acct_map[s])
-    # allow entering raw id
-    return int(s)
+    # otherwise treat as raw id
+    val = int(s)
+    if val <= 0:
+        raise ValueError("Account-ID muss > 0 sein.")
+    return val
 
 def resolve_currency_id(user_value: str) -> int:
-    """Accept 'CHF' or an integer id; map to currency_id."""
     s = str(user_value).strip().upper()
     if s in st.session_state.curr_map:
         return int(st.session_state.curr_map[s])
-    return int(s)
+    val = int(s)
+    if val <= 0:
+        raise ValueError("currency_id muss > 0 sein.")
+    return val
+
+def normalize_iso_date(d):
+    if isinstance(d, dt_date):
+        return d.isoformat()
+    s = str(d).strip().replace("/", "-").replace(".", "-")
+    if not re.match(r"^\d{4}-\d{2}-\d{2}$", s):
+        raise ValueError(f"Ungültiges Datum '{d}'. Erwartet: YYYY-MM-DD.")
+    return s
 
 # ---------- UI ----------
+
 with st.expander("Config diagnostics"):
     dbg = {
         "client_id": BEXIO_CLIENT_ID[:3] + "…",
@@ -126,39 +162,45 @@ if time.time() > st.session_state.oauth.get("expires_at", 0):
     with st.spinner("Session wird erneuert …"):
         refresh_access_token()
 
-# Mapping helpers
-with st.expander("Optional: Konto-Nr → ID Mapping einfügen (eine pro Zeile, z. B. 1020=77)"):
-    mapping_text = st.text_area("Konten-Mapping", value="", height=120,
-                                placeholder="1020=77\n3200=139")
+# Mapping helpers (flexible parsers)
+with st.expander("Optional: Konto-Nr → ID Mapping (eine pro Zeile; erlaubt: = : , ; oder Leerzeichen)"):
+    mapping_text = st.text_area(
+        "Konten-Mapping",
+        value="",
+        height=140,
+        placeholder="Beispiele:\n1020=77\n3200:139\n1000,55\n2400    88\n# Kommentare erlaubt",
+    )
     if st.button("Konten-Mapping übernehmen"):
-        new_map = {}
-        for line in mapping_text.splitlines():
-            if "=" in line:
-                k, v = line.split("=", 1)
-                k, v = k.strip(), v.strip()
-                if k and v:
-                    new_map[k] = v
+        new_map, bad = _parse_mapping(mapping_text, upper_keys=False)
         st.session_state.acct_map.update(new_map)
         st.success(f"{len(new_map)} Konten übernommen.")
+        if bad:
+            st.warning("Konnte nicht lesen:\n" + "\n".join([f"Zeile {ln}: {txt}" for ln, txt in bad[:5]]) + ("…" if len(bad)>5 else ""))
+    if st.session_state.acct_map:
+        st.caption("Aktuelles Konten-Mapping (erste 20):")
+        st.json(dict(list(st.session_state.acct_map.items())[:20]))
 
-with st.expander("Optional: Währungscode → currency_id (eine pro Zeile, z. B. CHF=1)"):
-    curr_text = st.text_area("Währungs-Mapping", value="", height=100,
-                             placeholder="CHF=1\nEUR=2\nUSD=3")
+with st.expander("Optional: Währungscode → currency_id (eine pro Zeile; z. B. CHF=1)"):
+    curr_text = st.text_area(
+        "Währungs-Mapping",
+        value="",
+        height=120,
+        placeholder="CHF=1\nEUR:2\nUSD,3\n# Kommentare erlaubt",
+    )
     if st.button("Währungs-Mapping übernehmen"):
-        new_map = {}
-        for line in curr_text.splitlines():
-            if "=" in line:
-                k, v = line.split("=", 1)
-                k, v = k.strip().upper(), v.strip()
-                if k and v:
-                    new_map[k] = v
+        new_map, bad = _parse_mapping(curr_text, upper_keys=True)
         st.session_state.curr_map.update(new_map)
         st.success(f"{len(new_map)} Währungen übernommen.")
+        if bad:
+            st.warning("Konnte nicht lesen:\n" + "\n".join([f"Zeile {ln}: {txt}" for ln, txt in bad[:5]]) + ("…" if len(bad)>5 else ""))
+    if st.session_state.curr_map:
+        st.caption("Aktuelles Währungs-Mapping:")
+        st.json(st.session_state.curr_map)
 
 # Form
 with st.form("post_entry"):
     col1, col2 = st.columns(2)
-    date = col1.date_input("Datum (YYYY-MM-DD)")
+    date_val = col1.date_input("Datum (YYYY-MM-DD)")
     beschreibung = col2.text_input("Beschreibung / Text")
 
     col3, col4 = st.columns(2)
@@ -169,7 +211,6 @@ with st.form("post_entry"):
     waehrungskurs = col5.number_input("Währungskurs (currency_factor)", min_value=0.0, step=0.0001,
                                       format="%.6f", value=1.0)
     debit_kto = col6.text_input("Debit-Konto (Nr oder ID, z. B. 1020 oder 77)")
-
     credit_kto = st.text_input("Credit-Konto (Nr oder ID, z. B. 3200 oder 139)")
 
     use_next_ref = st.checkbox("Referenznummer automatisch beziehen", value=True)
@@ -179,8 +220,9 @@ with st.form("post_entry"):
 
 if submitted:
     try:
-        debit_id = resolve_account_id(debit_kto)
-        credit_id = resolve_account_id(credit_kto)
+        post_date   = normalize_iso_date(date_val)
+        debit_id    = resolve_account_id(debit_kto)
+        credit_id   = resolve_account_id(credit_kto)
         currency_id = resolve_currency_id(waehrung)
 
         ref_nr = reference_nr.strip()
@@ -194,13 +236,13 @@ if submitted:
             "credit_account_id": credit_id,
             "amount": float(amount),
             "description": beschreibung or "",
-            "currency_id": currency_id,                  # <-- required by your tenant
-            "currency_factor": float(waehrungskurs),     # include even if 1.0 for clarity
+            "currency_id": int(currency_id),
+            "currency_factor": float(waehrungskurs),
         }
 
         payload = {
             "type": "manual_single_entry",
-            "date": str(date),
+            "date": post_date,
             "entries": [entry],
         }
         if ref_nr:
@@ -223,7 +265,7 @@ if submitted:
             st.stop()
 
         r.raise_for_status()
-        st.success("Manuelle Buchung erfolgreich erstellt.")
+        st.success("✅ Manuelle Buchung erfolgreich erstellt.")
         st.json(r.json())
 
     except requests.HTTPError as e:
